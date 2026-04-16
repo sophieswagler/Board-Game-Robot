@@ -29,7 +29,7 @@ ARM JOINTS (6 total):
 HARDWARE AUTO-DETECTION:
     This file tries hardware drivers in this order:
         1. PCA9685 via adafruit ServoKit (best — dedicated PWM chip, most stable)
-        2. pigpio library on Raspberry Pi GPIO (no extra board needed)
+        2. lgpio library on Raspberry Pi GPIO (modern replacement for pigpio)
         3. Dry-run fallback (prints commands, no hardware — works on Windows)
 
 SMOOTH MOTION (cubic polynomial):
@@ -60,7 +60,7 @@ HOW TO HOOK INTO game_controller.py:
 
 Dependencies (Raspberry Pi):
     OPTION A (PCA9685): pip install adafruit-circuitpython-servokit adafruit-blinka
-    OPTION B (GPIO):    sudo apt install pigpio python3-pigpio && sudo pigpiod
+    OPTION B (GPIO):    lgpio is pre-installed on modern Raspberry Pi OS (no setup needed)
 """
 
 import math   # atan2, acos, sqrt, pi — used throughout the IK solver
@@ -95,9 +95,9 @@ from board_coordinates import square_to_mm, graveyard_mm
 # We try PCA9685 first (most reliable), then pigpio GPIO, then fall back to
 # dry-run mode (just prints — useful for testing on Windows without hardware).
 
-_MODE = None        # will be set to "pca9685", "pigpio", or "dryrun"
+_MODE = None        # will be set to "pca9685", "lgpio", or "dryrun"
 _kit  = None        # holds ServoKit instance (PCA9685 mode only)
-_pi   = None        # holds pigpio.pi() instance (pigpio mode only)
+_lg   = None        # holds lgpio chip handle (lgpio mode only)
 
 # Map each joint name → its GPIO BCM pin number (used in pigpio mode)
 _GPIO_PINS = {
@@ -120,14 +120,18 @@ try:
     print("[arm_controller] Using PCA9685 via ServoKit.")
 
 except Exception:
-    # ── Try Option B: pigpio direct GPIO ──────────────────────────────────────
+    # ── Try Option B: lgpio direct GPIO ───────────────────────────────────────
     try:
-        import pigpio
-        _pi = pigpio.pi()    # connects to the pigpio daemon (must run: sudo pigpiod)
-        if not _pi.connected:
-            raise RuntimeError("pigpio daemon not running — run: sudo pigpiod")
-        _MODE = "pigpio"
-        print("[arm_controller] Using pigpio GPIO.")
+        import lgpio
+        _lg = lgpio.gpiochip_open(0)   # open /dev/gpiochip0 (the main Pi GPIO bank)
+        if _lg < 0:
+            raise RuntimeError(f"lgpio failed to open GPIO chip (error {_lg})")
+        # Claim all 6 servo pins as outputs so lgpio can drive them
+        for _pin in [GPIO_PIN_BASE, GPIO_PIN_SHOULDER, GPIO_PIN_ELBOW,
+                     GPIO_PIN_WRIST_PITCH, GPIO_PIN_WRIST_ROLL, GPIO_PIN_GRIPPER]:
+            lgpio.gpio_claim_output(_lg, _pin)
+        _MODE = "lgpio"
+        print("[arm_controller] Using lgpio GPIO.")
 
     except Exception:
         # ── Option C: Dry-run (no hardware) ───────────────────────────────────
@@ -219,10 +223,10 @@ def _send_servo_angle(channel: int, angle_deg: float):
     if _MODE == "pca9685":
         _kit.servo[channel].angle = clamped         # ServoKit converts to PWM internally
 
-    elif _MODE == "pigpio":
+    elif _MODE == "lgpio":
         pin = _GPIO_PINS[channel]                   # look up which GPIO pin this joint uses
         pulse_us = _angle_to_pulse_us(clamped)      # convert degrees to microseconds
-        _pi.set_servo_pulsewidth(pin, pulse_us)     # send PWM pulse via DMA
+        lgpio.tx_servo(_lg, pin, pulse_us)          # send 50 Hz servo pulse via lgpio
 
     else:  # dryrun
         print(f"    [SERVO ch={channel}] → {clamped:.1f}°")
