@@ -128,7 +128,7 @@ except Exception:
         for ch, pin in _GPIO_PINS.items():
             GPIO.setup(pin, GPIO.OUT)
             pwm = GPIO.PWM(pin, 50)  # 50Hz servo frequency
-            pwm.start(0)             # start with signal off; ChangeDutyCycle drives motion
+            pwm.start(7.5)           # start at 90° neutral — 0 means no signal and arm goes limp
             _pwm[ch] = pwm
         _MODE = "rpi_gpio"
         print("[arm_controller] Using RPi.GPIO software PWM.")
@@ -290,9 +290,9 @@ def _smooth_move(channel: int, target_angle_deg: float, duration: float = SMOOTH
     a2 =  3 * delta / (duration ** 2)   # quadratic coefficient
     a3 = -2 * delta / (duration ** 3)   # cubic coefficient
 
-    # Each step is exactly one 50Hz PWM cycle (20ms) so lgpio's queue never
-    # accumulates more than one pending command at a time, preventing jumpy motion.
-    dt    = 0.02                          # 20ms = one servo PWM cycle at 50Hz
+    # 50ms per step — gives the servo enough time to physically reach each intermediate
+    # position before the next command arrives. Faster than this causes twitching.
+    dt    = 0.05                          # 50ms per step (matches Elliott's working scripts)
     steps = int(duration / dt)            # how many steps fit in the duration
 
     for i in range(steps + 1):
