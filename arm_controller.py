@@ -188,9 +188,12 @@ SERVO_DIR = {
 _current_servo_angle = {ch: SERVO_ZERO[ch] for ch in SERVO_ZERO}
 
 # Smooth motion tuning
-SMOOTH_STEPS     = 50    # number of interpolation steps per movement (more = smoother but slower)
-SMOOTH_DURATION  = 0.8   # seconds for one servo to complete a standard move
-GRIPPER_DURATION = 0.4   # seconds for gripper open/close (shorter is fine, gripper is light)
+SMOOTH_DURATION  = 1.5   # seconds for one servo to complete a standard move
+GRIPPER_DURATION = 0.6   # seconds for gripper open/close
+
+# Steps are derived from duration so each step = one 50Hz PWM cycle (20ms).
+# This prevents lgpio's queue from overflowing, which causes jumpy/twitchy motion.
+SMOOTH_STEPS     = int(SMOOTH_DURATION / 0.02)   # e.g. 1.5s → 75 steps at 20ms each
 
 
 # ── Section 1: Low-Level Servo Hardware ───────────────────────────────────────
@@ -289,13 +292,16 @@ def _smooth_move(channel: int, target_angle_deg: float, duration: float = SMOOTH
     a2 =  3 * delta / (duration ** 2)   # quadratic coefficient
     a3 = -2 * delta / (duration ** 3)   # cubic coefficient
 
-    dt = duration / SMOOTH_STEPS        # time between each interpolation step
+    # Each step is exactly one 50Hz PWM cycle (20ms) so lgpio's queue never
+    # accumulates more than one pending command at a time, preventing jumpy motion.
+    dt    = 0.02                          # 20ms = one servo PWM cycle at 50Hz
+    steps = int(duration / dt)            # how many steps fit in the duration
 
-    for i in range(SMOOTH_STEPS + 1):
-        t     = i * dt                              # current time within the move
-        angle = start_angle + a2 * t**2 + a3 * t**3  # cubic position at time t
-        _send_servo_angle(channel, angle)           # send PWM command
-        time.sleep(dt)                              # wait for next step
+    for i in range(steps + 1):
+        t     = i * dt                               # current time within the move
+        angle = start_angle + a2 * t**2 + a3 * t**3 # cubic position at time t
+        _send_servo_angle(channel, angle)            # send PWM command
+        time.sleep(dt)                               # wait one full PWM cycle before next command
 
 
 # ── Section 3: IK Solver ──────────────────────────────────────────────────────
