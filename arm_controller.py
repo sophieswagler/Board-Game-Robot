@@ -536,18 +536,42 @@ if __name__ == "__main__":
     import sys
 
     if "--calibrate" in sys.argv:
-        # Sweep each servo through 0° → 90° → 180° → 90° one at a time.
-        # Big angle changes make it obvious whether each servo is responding.
-        print("=== CALIBRATION MODE: sweeping each servo 0 → 90 → 180 → 90 ===\n")
-        names = ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"]
-        for ch, name in zip([SERVO_CH_BASE, SERVO_CH_SHOULDER, SERVO_CH_ELBOW,
-                              SERVO_CH_WRIST_PITCH, SERVO_CH_WRIST_ROLL, SERVO_CH_GRIPPER], names):
+        # Safe calibration order:
+        #   1. Hold base fixed at 90° (facing forward) — base sweeping with arm down is dangerous
+        #   2. Raise shoulder first so arm lifts off the table
+        #   3. Then sweep elbow, wrist, gripper one at a time
+        #   4. Sweep base LAST once arm is safely raised
+        print("=== CALIBRATION MODE ===")
+        print("Sweeping joints one at a time. Base goes last for safety.\n")
+
+        # Step 1: lock base forward and raise shoulder first
+        print("--- holding base at 90 (forward) ---")
+        _send_servo_angle(SERVO_CH_BASE, 90.0)
+        time.sleep(1.0)
+
+        # Step 2: sweep shoulder, elbow, wrist, gripper — arm rises before anything dangerous
+        safe_order = [
+            (SERVO_CH_SHOULDER,    "shoulder"),
+            (SERVO_CH_ELBOW,       "elbow"),
+            (SERVO_CH_WRIST_PITCH, "wrist_pitch"),
+            (SERVO_CH_WRIST_ROLL,  "wrist_roll"),
+            (SERVO_CH_GRIPPER,     "gripper"),
+        ]
+        for ch, name in safe_order:
             print(f"--- {name} (ch {ch}) ---")
             for angle in [0.0, 90.0, 180.0, 90.0]:
-                print(f"  → {angle}°")
+                print(f"  -> {angle} deg")
                 _send_servo_angle(ch, angle)
                 time.sleep(1.0)
             time.sleep(0.5)
+
+        # Step 3: sweep base last — arm should be in a raised/safe position by now
+        print("--- base (ch 0) --- sweeping last, make sure arm is raised! ---")
+        for angle in [45.0, 90.0, 135.0, 90.0]:   # smaller range for safety (not full 0-180)
+            print(f"  -> {angle} deg")
+            _send_servo_angle(SERVO_CH_BASE, angle)
+            time.sleep(1.0)
+
         print("\nDone. Adjust SERVO_ZERO[] values based on observations.")
 
     else:
