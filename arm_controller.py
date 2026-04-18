@@ -95,11 +95,11 @@ from board_coordinates import square_to_mm, graveyard_mm
 # We try PCA9685 first (most reliable), then pigpio GPIO, then fall back to
 # dry-run mode (just prints — useful for testing on Windows without hardware).
 
-_MODE = None        # will be set to "pca9685", "lgpio", or "dryrun"
+_MODE = None        # will be set to "pca9685", "rpi_gpio", or "dryrun"
 _kit  = None        # holds ServoKit instance (PCA9685 mode only)
-_lg   = None        # holds lgpio chip handle (lgpio mode only)
+_pwm  = {}          # holds RPi.GPIO PWM objects per channel (rpi_gpio mode only)
 
-# Map each joint name → its GPIO BCM pin number (used in pigpio mode)
+# Map each joint channel → its GPIO BCM pin number
 _GPIO_PINS = {
     SERVO_CH_BASE:        GPIO_PIN_BASE,
     SERVO_CH_SHOULDER:    GPIO_PIN_SHOULDER,
@@ -120,18 +120,18 @@ try:
     print("[arm_controller] Using PCA9685 via ServoKit.")
 
 except Exception:
-    # ── Try Option B: lgpio direct GPIO ───────────────────────────────────────
+    # ── Try Option B: RPi.GPIO software PWM ───────────────────────────────────
     try:
-        import lgpio
-        _lg = lgpio.gpiochip_open(0)   # open /dev/gpiochip0 (the main Pi GPIO bank)
-        if _lg < 0:
-            raise RuntimeError(f"lgpio failed to open GPIO chip (error {_lg})")
-        # Claim all 6 servo pins as outputs so lgpio can drive them
-        for _pin in [GPIO_PIN_BASE, GPIO_PIN_SHOULDER, GPIO_PIN_ELBOW,
-                     GPIO_PIN_WRIST_PITCH, GPIO_PIN_WRIST_ROLL, GPIO_PIN_GRIPPER]:
-            lgpio.gpio_claim_output(_lg, _pin)
-        _MODE = "lgpio"
-        print("[arm_controller] Using lgpio GPIO.")
+        import RPi.GPIO as GPIO
+        GPIO.setmode(GPIO.BCM)       # use BCM pin numbering throughout
+        GPIO.setwarnings(False)
+        for ch, pin in _GPIO_PINS.items():
+            GPIO.setup(pin, GPIO.OUT)
+            pwm = GPIO.PWM(pin, 50)  # 50Hz servo frequency
+            pwm.start(0)             # start with signal off; ChangeDutyCycle drives motion
+            _pwm[ch] = pwm
+        _MODE = "rpi_gpio"
+        print("[arm_controller] Using RPi.GPIO software PWM.")
 
     except Exception:
         # ── Option C: Dry-run (no hardware) ───────────────────────────────────
@@ -198,17 +198,16 @@ SMOOTH_STEPS     = int(SMOOTH_DURATION / 0.02)   # e.g. 1.5s → 75 steps at 20m
 
 # ── Section 1: Low-Level Servo Hardware ───────────────────────────────────────
 
-def _angle_to_pulse_us(angle_deg: float) -> int:
+def _angle_to_duty(angle_deg: float) -> float:
     """
-    Convert a servo angle (0–180°) to a PWM pulse width in microseconds.
+    Convert a servo angle (0–180°) to a PWM duty cycle percentage for RPi.GPIO.
 
-    The MG996R uses:  500 µs → 0°,   2500 µs → 180°
-    Linear mapping: pulse = 500 + (angle / 180) * 2000
-
-    Used only in pigpio mode (ServoKit handles this conversion internally).
+    At 50Hz (20ms period):
+        0°   = 0.5ms pulse = 2.5% duty cycle
+        180° = 2.5ms pulse = 12.5% duty cycle
+    Linear mapping: duty = 2.5 + (angle / 180) * 10.0
     """
-    pulse = SERVO_PULSE_MIN_US + (angle_deg / 180.0) * (SERVO_PULSE_MAX_US - SERVO_PULSE_MIN_US)
-    return int(pulse)   # pigpio expects an integer microsecond value
+    return 2.5 + (angle_deg / 180.0) * 10.0  # duty cycle in percent (2.5–12.5%)
 
 
 def _send_servo_angle(channel: int, angle_deg: float):
@@ -224,12 +223,11 @@ def _send_servo_angle(channel: int, angle_deg: float):
     clamped = max(0.0, min(180.0, angle_deg))
 
     if _MODE == "pca9685":
-        _kit.servo[channel].angle = clamped         # ServoKit converts to PWM internally
+        _kit.servo[channel].angle = clamped              # ServoKit converts to PWM internally
 
-    elif _MODE == "lgpio":
-        pin = _GPIO_PINS[channel]                   # look up which GPIO pin this joint uses
-        pulse_us = _angle_to_pulse_us(clamped)      # convert degrees to microseconds
-        lgpio.tx_servo(_lg, pin, pulse_us)          # send 50 Hz servo pulse via lgpio
+    elif _MODE == "rpi_gpio":
+        duty = _angle_to_duty(clamped)                   # convert degrees to duty cycle %
+        _pwm[channel].ChangeDutyCycle(duty)              # update running PWM — smoother than reissuing
 
     else:  # dryrun
         print(f"    [SERVO ch={channel}] → {clamped:.1f}°")
