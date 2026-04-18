@@ -536,17 +536,19 @@ if __name__ == "__main__":
     import sys
 
     if "--calibrate" in sys.argv:
-        # Send every servo to 90° (midpoint of range).
-        # Use this to physically find the neutral position of each joint.
-        # Observe the arm and adjust SERVO_ZERO constants above.
-        print("=== CALIBRATION MODE: sending all servos to 90° ===")
-        print("Observe each joint. When done, Ctrl+C to exit.\n")
-        for ch in [SERVO_CH_BASE, SERVO_CH_SHOULDER, SERVO_CH_ELBOW,
-                   SERVO_CH_WRIST_PITCH, SERVO_CH_WRIST_ROLL, SERVO_CH_GRIPPER]:
-            print(f"  Moving channel {ch} to 90°...")
-            _send_servo_angle(ch, 90.0)
-            time.sleep(1.0)
-        print("\nAll servos at 90°. Adjust SERVO_ZERO[] values based on observations.")
+        # Sweep each servo through 0° → 90° → 180° → 90° one at a time.
+        # Big angle changes make it obvious whether each servo is responding.
+        print("=== CALIBRATION MODE: sweeping each servo 0 → 90 → 180 → 90 ===\n")
+        names = ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"]
+        for ch, name in zip([SERVO_CH_BASE, SERVO_CH_SHOULDER, SERVO_CH_ELBOW,
+                              SERVO_CH_WRIST_PITCH, SERVO_CH_WRIST_ROLL, SERVO_CH_GRIPPER], names):
+            print(f"--- {name} (ch {ch}) ---")
+            for angle in [0.0, 90.0, 180.0, 90.0]:
+                print(f"  → {angle}°")
+                _send_servo_angle(ch, angle)
+                time.sleep(1.0)
+            time.sleep(0.5)
+        print("\nDone. Adjust SERVO_ZERO[] values based on observations.")
 
     else:
         # IK self-test: compute and print joint angles for a set of board squares.
