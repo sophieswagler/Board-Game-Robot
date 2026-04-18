@@ -171,7 +171,7 @@ SERVO_CH_GRIPPER:     int = 5  # gripper open/close
 # Swap these if any pins are already in use on your Pi.
 GPIO_PIN_BASE:        int = 17  # BCM 17 = physical pin 11
 GPIO_PIN_SHOULDER:    int = 27  # BCM 27 = physical pin 13
-GPIO_PIN_ELBOW:       int = 22  # BCM 22 = physical pin 15
+GPIO_PIN_ELBOW:       int = 26  # BCM 26 = physical pin 37
 GPIO_PIN_WRIST_PITCH: int = 23  # BCM 23 = physical pin 16
 GPIO_PIN_WRIST_ROLL:  int = 24  # BCM 24 = physical pin 18
 GPIO_PIN_GRIPPER:     int = 25  # BCM 25 = physical pin 22
