@@ -128,7 +128,7 @@ except Exception:
         for ch, pin in _GPIO_PINS.items():
             GPIO.setup(pin, GPIO.OUT)
             pwm = GPIO.PWM(pin, 50)  # 50Hz servo frequency
-            pwm.start(7.5)           # start at 90° neutral — 0 means no signal and arm goes limp
+            pwm.start(0)             # start at 0 to match servo_test.py (the working reference)
             _pwm[ch] = pwm
         _MODE = "rpi_gpio"
         print("[arm_controller] Using RPi.GPIO software PWM.")
