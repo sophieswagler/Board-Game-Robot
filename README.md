@@ -31,11 +31,12 @@ Physical arm moves the piece on the board
 |------|--------|-------------|
 | `chess_engine.py` | ✅ Done | Chess logic, move validation, Stockfish integration |
 | `game_controller.py` | ✅ Done | Main game loop, arm stub functions |
-| `board_coordinates.py` | 🔲 Not started | Maps square names → physical (x, y, z) positions |
-| `arm_controller.py` | 🔲 Not started | Inverse kinematics, servo control via GPIO |
-| `config.py` | 🔲 Not started | Hardware configuration (pin numbers, arm dimensions, board origin) |
+| `board_coordinates.py` | ✅ Done | Maps square names → physical (x, y, z) positions |
+| `arm_controller.py` | ✅ Done | Inverse kinematics, servo control via RPi.GPIO or PCA9685 |
+| `config.py` | ✅ Done | Hardware configuration (pin numbers, arm dimensions, board origin) |
+| `servo_test.py` | ✅ Done | Final standalone arm motion script — runs on Pi, sensor + button + servos |
 
-The chess logic is fully working and testable right now — no hardware needed. Run it on any machine with Python.
+The chess logic is fully working and testable right now — no hardware needed. Run it on any machine with Python. The arm controller and servo script are complete and have been tested on hardware.
 
 ---
 
@@ -64,9 +65,13 @@ For chess, the wrist always points straight down, which simplifies the inverse k
 
 Install on the Raspberry Pi:
 ```bash
-pip install chess pigpio
+pip install chess RPi.GPIO
 sudo apt install stockfish
-sudo systemctl enable pigpiod && sudo systemctl start pigpiod
+```
+
+Optional — only if using a PCA9685 servo driver board instead of direct GPIO:
+```bash
+pip install adafruit-circuitpython-servokit adafruit-blinka
 ```
 
 For local development on Windows/Mac (no Pi needed):
@@ -127,29 +132,28 @@ The main game loop. Ties everything together.
 - The arm stub functions (`arm_pick_and_place`, `arm_remove_piece`) at the top of this file are the only things that need to change when `arm_controller.py` is ready. The game loop itself stays the same.
 - Handles all special moves: captures, en passant, castling (moves both king and rook), and promotion (prints a reminder for the human to physically swap the piece).
 
-### `board_coordinates.py` *(to be written)*
-Will map chess square names to physical coordinates in millimeters.
+### `board_coordinates.py`
+Maps chess square names to physical coordinates in millimeters using the board origin and square size defined in `config.py`.
 
-What it needs:
-- The position of the board origin (corner of a1) relative to the arm base
-- The square size in mm (57.15 mm for standard boards)
-- Three Z heights: travel height (above pieces), pick height (gripping), place height (releasing)
+### `arm_controller.py`
+Full hardware arm controller.
 
-### `arm_controller.py` *(to be written)*
-Will handle all hardware interaction.
+- Inverse kinematics: given a target (x, y, z), compute all 6 joint angles
+- Smooth motion: cubic polynomial interpolation so servos ramp up and slow down
+- Auto-detects hardware: tries PCA9685 → RPi.GPIO → dry-run fallback
+- Run `python arm_controller.py --calibrate` to sweep each joint and tune `SERVO_ZERO`/`SERVO_DIR`
 
-What it needs to do:
-- Inverse kinematics: given a target (x, y, z), compute the 6 joint angles
-- Servo control: convert joint angles to PWM pulse widths and send them via PCA9685
-- Motion sequencing: move smoothly between positions without knocking pieces over
+### `config.py`
+All hardware constants in one place: GPIO pin numbers, servo pulse widths, arm link lengths, board origin, and graveyard positions. Edit this file after physically measuring your setup — nothing else needs to change.
 
-### `config.py` *(to be written)*
-Will hold all hardware constants in one place so nothing is hardcoded elsewhere. Things like:
-- GPIO/I2C pin numbers
-- Servo pulse width min/max for each joint
-- Arm link lengths (needed for IK math)
-- Board origin position and square size
-- Graveyard positions (where captured pieces are dropped)
+### `servo_test.py`
+Final standalone arm motion script. Runs directly on the Pi without the rest of the chess system. Handles:
+- Ultrasonic sensor loop (HC-SR04) — detects when a piece is placed in front of the arm
+- Button input — press to trigger the arm's left-wave sequence
+- Buzzer feedback — beeps once when the gripper closes
+- Full servo control for all 6 joints
+
+Run this to verify hardware is wired correctly before running the full game.
 
 ---
 
@@ -184,20 +188,17 @@ These values get calibrated once the board is physically placed and the arm link
 
 ## Next Steps
 
-1. Measure arm link lengths once motors are mounted
-2. Decide on and purchase servo motors + PCA9685 driver board
-3. Write `config.py` with all hardware constants
-4. Write `board_coordinates.py` with the square → coordinate mapping
-5. Write `arm_controller.py` with IK math and servo control
-6. Calibrate: position the arm at known squares and record the servo angles
-7. Integration test: play a full game with the physical arm
+1. Calibrate servo zero positions: run `python arm_controller.py --calibrate` and tune `SERVO_ZERO`/`SERVO_DIR` in `arm_controller.py`
+2. Set board origin: physically place the board, jog the arm to square a1, and update `BOARD_ORIGIN_X/Y/Z_MM` in `config.py`
+3. Integration test: run `python game_controller.py --live` and play a full game with the physical arm
 
 ---
 
 ## Contributing
 
 If you're joining this project:
-- All configuration (pin numbers, arm dimensions, etc.) will live in `config.py` — that's the first place to look if something hardware-related needs changing
+- All configuration (pin numbers, arm dimensions, etc.) lives in `config.py` — that's the first place to look if something hardware-related needs changing
 - The chess logic in `chess_engine.py` does not need to change unless you want to adjust Stockfish's strength (change `THINK_TIME`) or add features like move history
-- To swap in real arm control, find the two TODO comments in `game_controller.py` inside `arm_pick_and_place()` and `arm_remove_piece()` and replace them with calls to `arm_controller.py`
-- Run `python game_controller.py` (dry-run mode) to test any changes without needing the physical hardware
+- To enable real arm movement, replace the TODO stubs in `game_controller.py` inside `arm_pick_and_place()` and `arm_remove_piece()` with calls to `arm_controller.py`
+- Run `python game_controller.py` (dry-run mode, no `--live` flag) to test chess logic without any hardware
+- Run `python servo_test.py` on the Pi to verify all servos and sensors work before running the full game
